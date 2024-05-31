@@ -1,3 +1,4 @@
+import math
 import cv2
 import numpy as np
 import re
@@ -5,20 +6,29 @@ import os
 import openpyxl
 import pandas as pd
 from paddleocr import PaddleOCR
+#import dlib
+#from mtcnn import MTCNN
 
 choice = 0
-
+#发票的预处理旋转
 def rotate_image(image, angle):
     """
-    Rotate the image by the specified angle.
+    Rotate the image by the specified angle without losing any part of the image.
     """
     (h, w) = image.shape[:2]
     center = (w / 2, h / 2)
+    
+    # Calculate the new bounding dimensions of the image
+    new_w = int(w * abs(np.cos(np.radians(angle))) + h * abs(np.sin(np.radians(angle))))
+    new_h = int(h * abs(np.cos(np.radians(angle))) + w * abs(np.sin(np.radians(angle))))
+    
+    # Adjust the rotation matrix to take into account the new dimensions
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(image, M, (w, h))
+    M[0, 2] += (new_w / 2) - center[0]
+    M[1, 2] += (new_h / 2) - center[1]
+    
+    rotated = cv2.warpAffine(image, M, (new_w, new_h))
     return rotated
-
-
 
 def correct_image_orientation(image):
     """
@@ -39,9 +49,6 @@ def correct_image_orientation(image):
     else:
         return image, 0
 
-
-
-
 def correct_image_orientation_twice(image_path):
     """
     Correct the image orientation twice for better accuracy.
@@ -50,6 +57,13 @@ def correct_image_orientation_twice(image_path):
     image, angle1 = correct_image_orientation(image)
     corrected_image, angle2 = correct_image_orientation(image)
     return corrected_image, angle1 + angle2
+
+
+
+
+#身份证的预处理旋转
+
+
 
 
 
@@ -93,7 +107,12 @@ def gocr(img_path, name, lang="ch"):
 
 
     # Correct image orientation
-    corrected_image, angle = correct_image_orientation_twice(img_path)
+    if choice == '1':
+      corrected_image, angle = correct_image_orientation_twice(img_path)
+    elif choice == '2':
+      corrected_image, angle = cv2.imread(img_path), 0
+    else:
+      corrected_image, angle = cv2.imread(img_path), 0
 
 
     result = ocr.ocr(corrected_image, cls=True)
@@ -122,11 +141,77 @@ def gocr(img_path, name, lang="ch"):
     if choice == '1':
         return invoice_recognition(txts, dic, name)
     elif choice == '2':
-        #return id_card_recognition(txts, dic, name)
-        return 
+        return id_card_recognition(txts, dic, name, ocr, corrected_image) 
     elif choice == '3':
         return license_plate_recognition(txts, dic, name)
+    
+
+def id_card_recognition(txts, dic, name, ocr, image):
+    is_front_cover = False
+    if "中华人民共和国" in txts:
+        is_front_cover = True
+    if is_front_cover:
+        for item in txts:
+            if item != "居民身份证" and item != "中华人民共和国" and item != "签发机关" and item != "有效期限":
+                if is_date(item):
+                    dic['有效期限'] = item
+                elif "有效期限" in item:
+                    dic['有效期限'] = item[4:]
+                elif "签发机关" in item:
+                    dic['签发机关'] = item[4:]
+                else:
+                    dic['签发机关'] = item
+    else:
+        corrected_image = image
+        i = 0
+        while "姓名" not in txts[0] and i < 5:
+            corrected_image = rotate_image(corrected_image, 90)
+            result = ocr.ocr(corrected_image, cls=True)
+            txts = [line[1][0] for line in result[0]]
+            i += 1
+        if i == 5:
+            print('识别失败：{}'.format(name))
+        else:
+           
+            # 去除每个元素中的空格并合并为一个字符串
+            text = ''.join([txt.replace(" ", "") for txt in txts])
+            print(text)
+
+            # 关键字列表
+            keys = ["姓名", "性别", "民族", "出生", "住址", "公民身份号码"]
+            
+
+            # 遍历关键字并提取信息
+            for i, key in enumerate(keys):
+                start_index = text.find(key) + len(key)
+                if i < len(keys) - 1:
+                    end_index = text.find(keys[i + 1])
+                else:
+                    end_index = len(text)
+                dic[key] = str(text[start_index:end_index].strip())
+
+            # 对出生日期进行进一步处理
+            birth_date = dic['出生']
+            birth_date_parts = re.findall(r'\d+', birth_date)
+            if len(birth_date_parts) == 3:
+                dic['出生年月日'] = f"{birth_date_parts[0]}年{birth_date_parts[1]}月{birth_date_parts[2]}日"
+            else:
+                dic['出生年月日'] = birth_date
+
+            # 移除原始出生字段
+            del dic['出生']
+    return dic
+
+def is_date(date_string):
+    pattern = r'^\d{4}\.\d{2}\.\d{2}-\d{4}\.\d{2}\.\d{2}$'
+    if re.match(pattern, date_string):
+        return True
+    else:
+        return False
         
+
+
+
         
 def license_plate_recognition(txts, dic, name):  
     provinces = ["皖", "沪", "津", "渝", "冀", "晋", "蒙", "辽", "吉", "黑", "苏", "浙", "京", "闽", "赣", "鲁", "豫", "鄂", "湘", "粤", "桂", "琼", "川", "贵", "云", "藏", "陕", "甘", "青", "宁", "新", "警", "学"]
@@ -139,6 +224,7 @@ def license_plate_recognition(txts, dic, name):
                 item = item + txts[i+1]
             print(item)
             dic['车牌号'] = item
+            print('已识别完成：{}'.format(name))
             break
     return dic
     
@@ -224,6 +310,7 @@ def process_files(rootDir, file_types=['jpg', 'png'], lang="ch"):
     # 使用 pandas 保存到 CSV
     df = pd.DataFrame(data)
     df.to_csv(os.path.join(rootDir, "识别文字.csv"), index=False, encoding='utf-8-sig')
+
     
     print('一共识别完{}张图片'.format(len(paths)))
     print("谢谢使用本脚本:树荫", "\n")
