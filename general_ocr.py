@@ -6,8 +6,53 @@ import os
 import openpyxl
 import pandas as pd
 from paddleocr import PaddleOCR
-#import dlib
-#from mtcnn import MTCNN
+from pdf2image import convert_from_path
+from matplotlib import pyplot as plt
+from table.predict_table import TableSystem,to_excel
+from utility import init_args
+from paddleocr import PPStructure, draw_structure_result
+from paddleocr.ppstructure.table.tablepyxl import tablepyxl
+from bs4 import BeautifulSoup
+from PIL import Image
+from paddleocr import PPStructure,save_structure_res
+from paddleocr.ppstructure.recovery.recovery_to_doc import sorted_layout_boxes, convert_info_docx
+import logging
+import paddleocr
+import sys
+
+from contextlib import contextmanager
+
+
+# 确保 /app 和 /app/data 目录在 sys.path 中
+app_path = "/app"
+data_path = "/app/data"
+
+if app_path not in sys.path:
+    sys.path.insert(0, app_path)
+
+if data_path not in sys.path:
+    sys.path.insert(0, data_path)
+
+
+
+
+from data.deploy import ocr_bank
+
+
+# 确保 /app 和 /app/data 目录在 sys.path 中
+app_path = "/app"
+data_path = "/app/data"
+
+if app_path not in sys.path:
+    sys.path.insert(0, app_path)
+
+if data_path not in sys.path:
+    sys.path.insert(0, data_path)
+
+
+
+
+from data.deploy import ocr_bank
 
 choice = 0
 #发票的预处理旋转
@@ -61,11 +106,6 @@ def correct_image_orientation_twice(image_path):
 
 
 
-#身份证的预处理旋转
-
-
-
-
 
 
 def get_filelist(dir, Filelist):
@@ -84,13 +124,27 @@ def get_filelist(dir, Filelist):
 def get_files(filelist, file_types):
     """
     根据文件类型过滤文件，返回文件路径和文件名
+    如果是PDF文件，则将其转换为PNG格式
     """
     paths = []
     names = []
     for file in filelist:
-        if any(file.lower().endswith(ft) for ft in file_types):
+        if file.lower().endswith('.pdf'):
+            # 将PDF文件的所有页面转换为图像
+            images = convert_from_path(file)
+            if images:
+                for i, img in enumerate(images):
+                    # 保存每页图像
+                    png_file = f"{file.replace('.pdf', '')}_{i + 1}.png"
+                    img.save(png_file, 'PNG')
+                    
+                    # 添加路径和文件名到列表中
+                    paths.append(png_file)
+                    names.append(os.path.basename(png_file))
+        elif any(file.lower().endswith(ft) for ft in file_types):
             paths.append(file)
             names.append(os.path.basename(file))
+
     return paths, names
 
 
@@ -104,47 +158,256 @@ def gocr(img_path, name, lang="ch"):
     dic = {}
     ocr = PaddleOCR(use_angle_cls=True, lang=lang, use_gpu=True)
 
+    print(paddleocr.__version__)
+    logging.basicConfig(level=logging.INFO)
 
+    if int(choice) < 4:
+        # Correct image orientation
+        if choice == '1':
+            corrected_image, angle = correct_image_orientation_twice(img_path)
+        elif choice == '2':
+            corrected_image, angle = cv2.imread(img_path), 0
+        elif choice == '3':
+            corrected_image, angle = cv2.imread(img_path), 0
 
-    # Correct image orientation
-    if choice == '1':
-      corrected_image, angle = correct_image_orientation_twice(img_path)
-    elif choice == '2':
-      corrected_image, angle = cv2.imread(img_path), 0
-    else:
-      corrected_image, angle = cv2.imread(img_path), 0
-
-
-    result = ocr.ocr(corrected_image, cls=True)
-    #result = ocr.ocr(img_path, cls=True)
-    
-    confidence = ocr_confidence(result)
-    if confidence < 0.96:
-        # Rotate the image 180 degrees and re-run OCR
-        corrected_image = rotate_image(corrected_image, 180)
         result = ocr.ocr(corrected_image, cls=True)
+        #result = ocr.ocr(img_path, cls=True)
+        
+        confidence = ocr_confidence(result)
+        if confidence < 0.96:
+            # Rotate the image 180 degrees and re-run OCR
+            corrected_image = rotate_image(corrected_image, 180)
+            result = ocr.ocr(corrected_image, cls=True)
+        
+
+        #锐化和灰度化处理
+        corrected_image = process_image(corrected_image)
+        # Save corrected image（just for tesing）
+        corrected_image_path = img_path.replace('images', 'corrected_images')
+        cv2.imwrite(corrected_image_path, corrected_image)
+
+        
+        txts = [line[1][0] for line in result[0]]  # 确保从结果的正确层级提取文本
+        
+    
+    
+        if choice == '1':
+            return invoice_recognition(txts, dic, name)
+        elif choice == '2':
+            return id_card_recognition(txts, dic, name, ocr, corrected_image) 
+        elif choice == '3':
+            return license_plate_recognition(txts, dic, name)
+    elif choice == '4':
+        table_recognition(img_path)
+        return dic 
+    elif choice == '5':
+        document_recognition(img_path)
+        return dic
+    elif choice == '6':
+        return bank_card_recognition(img_path, dic, name)
+
+
+def bank_card_recognition(img_path, dic, name):
+    
+    img = cv2.imread(img_path)
+    #img = process_bank_card_image(img)
+
+    args = {
+        "use_gpu": False,
+        "enable_mkldnn": True
+    }
+
+
+
+    original_paths = sys.path
+    paths = [
+    "/app/data",
+    "/app/data",
+    "/app/data",
+    "/app/data",
+    "/app/data",
+    "/app/data/deploy",
+    "/usr/local/lib/python37.zip",
+    "/usr/local/lib/python3.7",
+    "/usr/local/lib/python3.7/lib-dynload",
+    "/usr/local/lib/python3.7/site-packages",
+    "/app/data/tools/infer",
+    "/app/data/tools/infer",
+    "/app/data/tools/infer",
+    "/app/data/tools/infer"
+    ]
+    sys.path = paths
+    #sys.path = move_b_to_first(sys.path, '/app/data')
+    # for element in sys.path:
+    #     print(element)
+
+    print("Original Directory:", os.getcwd())
+
+    dic['文件名'] = name
+    with change_working_directory('/app/data'):
+        print("Changed Directory:", os.getcwd())
+        # 在新目录中执行你的代码
+        ocr_b = ocr_bank.OCRBank(args=args)
+        print("initialization complete")
+        print(img_path)
+        tmp_dic = ocr_b.predict(None, img_path)
+        dic["银行卡号"] = tmp_dic['bank_card_number']
+        dic['银行名称'] = tmp_dic['bank_name']
+        dic['卡类型'] = tmp_dic['card_type']
+        print(dic)
+
+    print("Restored Directory:", os.getcwd())
+
+    return dic
     
 
-    # Save corrected image（just for tesing）
-    corrected_image_path = img_path.replace('images', 'corrected_images')
-    cv2.imwrite(corrected_image_path, corrected_image)
+    
+    
+# def move_b_to_first(arr, b):
+#     # 找到等于 b 的元素的索引
+#     try:
+#         b_index = arr.index(b)
+#     except ValueError:
+#         # 如果没有找到等于 b 的元素，返回原数组
+#         return arr
+    
+#     # 移动等于 b 的元素到第一位
+#     b_element = arr.pop(b_index)
+#     arr.insert(0, b_element)
+    
+#     return arr
 
-    
-    txts = [line[1][0] for line in result[0]]  # 确保从结果的正确层级提取文本
-    
-    #TODO delete this print
-    print(txts)
-    
+@contextmanager
+def change_working_directory(new_dir):
+    original_dir = os.getcwd()
+    try:
+        os.chdir(new_dir)
+        yield
+    finally:
+        os.chdir(original_dir)
 
 
-    
-    if choice == '1':
-        return invoice_recognition(txts, dic, name)
-    elif choice == '2':
-        return id_card_recognition(txts, dic, name, ocr, corrected_image) 
-    elif choice == '3':
-        return license_plate_recognition(txts, dic, name)
-    
+# def process_bank_card_image(image):
+#     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+#     # 使用Canny边缘检测算法识别卡号边缘
+#     edges = cv2.Canny(gray_image, 100, 200)
+
+#     # 使用形态学操作填充边缘
+#     kernel = np.ones((3, 3), np.uint8)
+#     dilated_edges = cv2.dilate(edges, kernel, iterations=1)
+#     filled_edges = cv2.morphologyEx(dilated_edges, cv2.MORPH_CLOSE, kernel)
+
+#     # 手动选择银行卡号区域（此处假设银行卡号位于图像的中间部分）
+#     mask = np.zeros_like(gray_image)
+#     h, w = gray_image.shape
+#     mask[int(h*0.4):int(h*0.6), int(w*0.2):int(w*0.8)] = 255
+
+#     # 使用掩膜增强对比度
+#     alpha = 0.5  # 对比度控制 (1.0-3.0)
+#     beta = 0     # 亮度控制 (0-100)
+#     enhanced_image = cv2.convertScaleAbs(gray_image, alpha=alpha, beta=beta)
+
+#     # 将掩膜应用到原始灰度图像上
+#     enhanced_part = cv2.bitwise_and(enhanced_image, enhanced_image, mask=mask)
+#     final_image = cv2.addWeighted(gray_image, 1, enhanced_part, 1, 0)
+#     return final_image
+
+def document_recognition(img_path, is_en = True):
+    print("document_recognition")
+
+    if is_en:
+        # 英文测试图
+        table_engine = PPStructure(recovery=True, lang='en')
+    else:
+        # 中文测试图
+        table_engine = PPStructure(recovery=True)
+
+    save_folder = './images/recovered_documents'
+    img = cv2.imread(img_path)
+    result = table_engine(img)
+    save_structure_res(result, save_folder, os.path.basename(img_path).split('.')[0])
+
+    total_confidence = 0
+    count = 0
+    print(len(result))
+    for line in result:
+        line.pop('img')
+        if 'res' in line:
+            for res_item in line['res']:
+                if 'confidence' in res_item:
+                    total_confidence += res_item['confidence']
+                    count += 1
+    print(result)
+    if count > 0:
+        average_confidence = total_confidence / count
+        print("Average Confidence:", average_confidence)
+    else:
+        print("No confidence values found.")
+        
+
+    if (count <= 0 or average_confidence < 0.7) and is_en != False:
+        document_recognition(img_path, is_en = False)
+        print("chinese")
+        return
+
+    h, w, _ = img.shape
+    res = sorted_layout_boxes(result, w)
+    print("saved")
+    try:
+        convert_info_docx(img, res, save_folder, os.path.basename(img_path).split('.')[0])
+    except IndexError:
+        print("Index out of bounds")
+
+
+
+
+def table_recognition(img_path):
+    # Load the image
+    img = cv2.imread(img_path)
+    if img is None:
+        print("Failed to load image")
+        return
+
+    # Initialize PP-Structure for table recognition
+    table_engine = PPStructure(recovery=True, lang='ch')
+
+    # Perform table recognition
+    result = table_engine(img)
+
+    # Debugging: Print the result to understand its structure
+    #print("Recognition result:", result)
+
+    # Ensure the output directory exists
+    output_dir = 'images'
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Extract the base name of the image file
+    base_name = os.path.splitext(os.path.basename(img_path))[0]
+
+    # Save the recognized table to an Excel file directly in the images directory
+    for item in result:
+        if item['type'] == 'table':
+            html_content = item['res']['html']
+            soup = BeautifulSoup(html_content, 'html.parser')
+            table = soup.find('table')
+            df = pd.read_html(str(table))[0]
+            excel_path = os.path.join(output_dir, f"{base_name}_table.xlsx")
+            df.to_excel(excel_path, index=False)
+            print(f"Table saved to {excel_path}")
+
+    # Check if files are saved correctly
+    saved_files = os.listdir(output_dir)
+    if saved_files:
+        print(f"Files saved in {output_dir}: {saved_files}")
+    else:
+        print(f"No files saved in {output_dir}. Please check the save process.")
+
+    print(f"Saved to {output_dir} successfully")
+
+
+
+
 
 def id_card_recognition(txts, dic, name, ocr, image):
     is_front_cover = False
@@ -180,7 +443,7 @@ def id_card_recognition(txts, dic, name, ocr, image):
             # 关键字列表
             keys = ["姓名", "性别", "民族", "出生", "住址", "公民身份号码"]
             
-
+            
             # 遍历关键字并提取信息
             for i, key in enumerate(keys):
                 start_index = text.find(key) + len(key)
@@ -210,7 +473,30 @@ def is_date(date_string):
         return False
         
 
+def process_image(image):
+    # 将图像转换为灰度图像
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+    # 创建锐化滤波器
+    kernel = np.array([[0, -1, 0],
+                    [-1, 5,-1],
+                    [0, -1, 0]])
+
+    # 应用锐化滤波器
+    sharpened_image = cv2.filter2D(gray_image, -1, kernel)
+
+    # 创建CLAHE对象
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+    # 应用CLAHE增强对比度
+    contrast_image = clahe.apply(sharpened_image)
+
+    # 调整对比度和亮度
+    alpha = 1.5  # 对比度控制 (1.0-3.0)
+    beta = -50   # 亮度控制 (-100 to 100)
+
+    adjusted_image = cv2.convertScaleAbs(contrast_image, alpha=alpha, beta=beta)
+    return adjusted_image
 
         
 def license_plate_recognition(txts, dic, name):  
@@ -221,7 +507,10 @@ def license_plate_recognition(txts, dic, name):
         item = txts[i]
         if any(province in item for province in provinces) and any(alphabet in item for alphabet in alphabets) or any(special in item for special in specials) and any(alphabet in item for alphabet in alphabets):
             if len(item) < 4:
-                item = item + txts[i+1]
+                if i+1 in range(len(txts)):
+                    item = item + txts[i+1]
+                else:
+                    item = item + txts[i-1]
             print(item)
             dic['车牌号'] = item
             print('已识别完成：{}'.format(name))
@@ -292,7 +581,7 @@ def invoice_recognition(txts, dic, name):
     print('已识别完成：{}'.format(name))
     return dic
 
-def process_files(rootDir, file_types=['jpg', 'png'], lang="ch"):
+def process_files(rootDir, file_types=['jpg', 'png','pdf'], lang="ch"):
 
     #输出cv2图片测试
     if not os.path.exists('corrected_images'):
@@ -304,8 +593,9 @@ def process_files(rootDir, file_types=['jpg', 'png'], lang="ch"):
     paths, names = get_files(filelist, file_types)
     data = []
     for n in range(len(paths)):
-        dic = gocr(paths[n], names[n], lang)
-        data.append(dic)
+        if not paths[n].lower().endswith('.pdf'):
+            dic = gocr(paths[n], names[n], lang)
+            data.append(dic)
     
     # 使用 pandas 保存到 CSV
     df = pd.DataFrame(data)
@@ -339,12 +629,15 @@ if __name__ == "__main__":
     print("1. 发票识别")
     print("2. 身份证识别")
     print("3. 车牌识别")
+    print("4. 表格识别")
+    print("5. 文档识别")
+    print("6. 银行卡识别")
     make_choice = False
     while not make_choice:
-        choice = input("请输入1, 2或3: ")
-        if choice != '1' and choice != '2' and choice != '3':
-            print("无效输入，请输入1, 2或3")
+        choice = input("请输入1~5中的一个数: ")
+        if choice != '1' and choice != '2' and choice != '3' and choice != '4' and choice != '5' and choice != '6':
+            print("无效输入，请输入1~6中的一个数")
         else:
             make_choice = True
-    process_files(rootDir, ['jpg', 'png'], lang="ch")
+    process_files(rootDir, ['jpg', 'png','pdf'], lang="ch")
 
