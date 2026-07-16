@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
+
+# Local OCR inputs and generated outputs
+images/*
+!images/*.txt
+corrected_images/*
+!corrected_images/*.txt
+*.log
+
+# Sensitive local material
+*.env
+.env
+*.pem
+*.key

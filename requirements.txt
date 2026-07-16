@@ -1,0 +1,16 @@
+Flask
+numpy
+opencv-python
+paddlepaddle
+paddleocr
+pdf2image
+pandas
+openpyxl
+XlsxWriter
+beautifulsoup4
+Pillow
+python-docx
+matplotlib
+requests
+Shapely
+pyclipper
