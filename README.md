@@ -8,6 +8,7 @@ A Flask-based OCR service for extracting structured information from Chinese bus
 
 - A Flask API that accepts images and PDFs and returns structured OCR results.
 - Image-preprocessing routines for rotation and orientation correction.
+- Improved robustness to rotation, perspective distortion, and layout variation with document-specific preprocessing and extraction rules.
 - Document-specific extraction for invoices, Chinese ID cards, bank cards, and license plates.
 - English API field names for downstream integrations, while preserving Chinese document support.
 - Table-to-Excel and document-to-DOCX conversion workflows.
