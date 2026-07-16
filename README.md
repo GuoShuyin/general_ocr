@@ -2,7 +2,7 @@
 
 [中文文档](./README.zh-CN.md)
 
-A Flask-based OCR service for extracting structured information from Chinese business and identity documents. The project combines PaddleOCR with OpenCV preprocessing and document-specific parsing rules to expose OCR capabilities through a simple HTTP API.
+An OCR service for extracting structured information from Chinese business and identity documents, designed to remain robust to rotation, perspective distortion, and layout variation. The project combines PaddleOCR with OpenCV preprocessing and document-specific parsing rules, then exposes the capability through a Flask HTTP API.
 
 ## What I built
 
