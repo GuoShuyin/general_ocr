@@ -1,5 +1,7 @@
 # Chinese Document OCR API
 
+[中文文档](./README.zh-CN.md)
+
 A Flask-based OCR service for extracting structured information from Chinese business and identity documents. The project combines PaddleOCR with OpenCV preprocessing and document-specific parsing rules to expose OCR capabilities through a simple HTTP API.
 
 ## What I built
@@ -58,4 +60,3 @@ The bundled inference assets and deployment scripts reflect the project's origin
 ## Attribution
 
 This project uses [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) and its related inference assets for OCR capabilities. PaddleOCR and any copied upstream components remain subject to their respective licenses; see [`NOTICE.md`](./NOTICE.md). The application API, preprocessing workflow, and document-specific extraction logic in this repository are project work by Shuyin Guo.
-
